@@ -14,6 +14,7 @@ interface Player {
     name: string;
     x: number;
     y: number;
+    radius: number;
     angle: number;
     score: number;
     level: number;
@@ -40,7 +41,7 @@ interface Shape {
 }
 
 const MAP_SIZE = 3000;
-const DEBUG_SKIP_MENU = false; // Set to true to bypass menu for testing
+const DEBUG_SKIP_MENU = false;
 
 export const GameCanvas: React.FC = () => {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -255,12 +256,13 @@ export const GameCanvas: React.FC = () => {
             playersRef.current.forEach((player) => {
                 if (player.x < 0) return;
 
+                const r = player.radius || 20;
                 const isMe = player.id === myIdRef.current;
                 const screenX = player.x - cameraX;
                 const screenY = player.y - cameraY;
 
                 ctx.save();
-                
+
                 // If it's our tank, apply the recoil offset backwards relative to the aim angle
                 if (isMe && recoilOffsetRef.current > 0) {
                     const kickX = -Math.cos(player.angle) * recoilOffsetRef.current;
@@ -272,9 +274,9 @@ export const GameCanvas: React.FC = () => {
 
                 ctx.rotate(player.angle);
                 ctx.fillStyle = '#999999';
-                ctx.fillRect(0, -8, 30, 16);
+                ctx.fillRect(0, -r * 0.4, r * 1.5, r * 0.8);   // barrel scales with size
                 ctx.beginPath();
-                ctx.arc(0, 0, 20, 0, Math.PI * 2);
+                ctx.arc(0, 0, r, 0, Math.PI * 2);               // body scales with size
                 ctx.fillStyle = isMe ? '#00b2e1' : '#f14e54';
                 ctx.fill();
                 ctx.lineWidth = 4;
@@ -283,25 +285,26 @@ export const GameCanvas: React.FC = () => {
                 ctx.closePath();
                 ctx.restore();
 
-                const barWidth = 40;
+                const barWidth = r * 2;
                 const barHeight = 6;
+                const barY = screenY + r + 8;
                 const maxH = player.maxHealth || 100;
                 const healthPercent = Math.max(0, player.health / maxH);
-                
+
                 ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-                ctx.fillRect(screenX - barWidth / 2, screenY + 28, barWidth, barHeight);
+                ctx.fillRect(screenX - barWidth / 2, barY, barWidth, barHeight);
 
                 ctx.fillStyle = '#85e37d';
-                ctx.fillRect(screenX - barWidth / 2, screenY + 28, barWidth * healthPercent, barHeight);
+                ctx.fillRect(screenX - barWidth / 2, barY, barWidth * healthPercent, barHeight);
 
                 ctx.strokeStyle = '#222222';
                 ctx.lineWidth = 1;
-                ctx.strokeRect(screenX - barWidth / 2, screenY + 28, barWidth, barHeight);
+                ctx.strokeRect(screenX - barWidth / 2, barY, barWidth, barHeight);
 
                 ctx.fillStyle = '#ffffff';
                 ctx.font = '12px Arial';
                 ctx.textAlign = 'center';
-                ctx.fillText(`${player.name || 'Tanker'} (Lvl ${player.level || 1})`, screenX, screenY - 30);
+                ctx.fillText(`${player.name || 'Tanker'} (Lvl ${player.level || 1})`, screenX, screenY - r - 10);
             });
 
             const miniWidth = minimapCanvas.width;

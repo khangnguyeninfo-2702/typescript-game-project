@@ -160,7 +160,8 @@ wss.on('connection', (ws) => {
             else if (data.type === 'INPUT' && player.x > 0) {
                 player.angle = data.angle || 0;
                 const baseSpeed = 0.6;
-                const acceleration = baseSpeed + (player.stats.movementSpeed * 0.1);
+                const mass = getMass(player.radius);
+                const acceleration = (baseSpeed + (player.stats.movementSpeed * 0.1)) / Math.sqrt(mass);
                 let ax = 0;
                 let ay = 0;
                 if (data.keys.w) ay -= acceleration;
@@ -174,19 +175,20 @@ wss.on('connection', (ws) => {
                 const baseBulletSpeed = 10;
                 const bulletSpeed = baseBulletSpeed + (player.stats.bulletSpeed * 0.8);
                 const bulletDamage = 10 + (player.stats.bulletDamage * 5);
-
+                const mass = getMass(player.radius);
+                const barrelTip = player.radius * 1.5 + 5;
                 bullets.push({
                     id: `b_${bulletIdCounter++}`,
                     playerId: id,
-                    x: player.x + Math.cos(player.angle) * 35,
-                    y: player.y + Math.sin(player.angle) * 35,
+                    x: player.x + Math.cos(player.angle) * barrelTip,
+                    y: player.y + Math.sin(player.angle) * barrelTip,
                     vx: Math.cos(player.angle) * bulletSpeed,
                     vy: Math.sin(player.angle) * bulletSpeed,
                     life: 60,
                     radius: 8,
                     damage: bulletDamage
                 });
-                const recoilForce = 2.5 + (player.stats.reload * 0.2); // Stronger reload/recoil scaling
+                const recoilForce = (2.5 + (player.stats.reload * 0.2)) / mass;
                 player.vx -= Math.cos(player.angle) * recoilForce;
                 player.vy -= Math.sin(player.angle) * recoilForce;
             }
@@ -255,7 +257,7 @@ setInterval(() => {
                 const dx = b.x - targetPlayer.x;
                 const dy = b.y - targetPlayer.y;
                 const dist = Math.sqrt(dx * dx + dy * dy);
-                const playerRadius = 20;
+                const playerRadius = targetPlayer.radius;
 
                 if (dist < b.radius + playerRadius) {
                     targetPlayer.health -= b.damage;
@@ -295,14 +297,17 @@ setInterval(() => {
     for (const player of players.values()) {
         if (player.x < 0) continue;
 
+        player.radius = getRadius(player.level);
+        const mass = getMass(player.radius);
+        const drag = Math.min(0.93, 0.85 + (mass - 1) * 0.02); // heavier = slides more
+
         player.x += player.vx;
         player.y += player.vy;
+        player.vx *= drag;
+        player.vy *= drag;
 
-        player.vx *= 0.85;
-        player.vy *= 0.85;
-
-        player.x = Math.max(20, Math.min(MAP_SIZE - 20, player.x));
-        player.y = Math.max(20, Math.min(MAP_SIZE - 20, player.y));
+        player.x = Math.max(player.radius, Math.min(MAP_SIZE - player.radius, player.x));
+        player.y = Math.max(player.radius, Math.min(MAP_SIZE - player.radius, player.y));
     }
 
     for (const player of players.values()) {
@@ -313,7 +318,7 @@ setInterval(() => {
             const dx = player.x - shape.x;
             const dy = player.y - shape.y;
             const dist = Math.sqrt(dx * dx + dy * dy);
-            const minDist = 20 + shape.radius;
+            const minDist = player.radius + shape.radius;
 
             if (dist < minDist) {
                 const overlap = minDist - dist;
@@ -340,6 +345,7 @@ setInterval(() => {
 
                 if (player.health <= 0) {
                     respawnPlayer(player);
+                    break;
                 }
             }
         }
@@ -355,6 +361,7 @@ setInterval(() => {
         angle: p.angle,
         score: p.score,
         level: p.level,
+        radius: p.radius,
         skillPoints: p.skillPoints,
         health: p.health,
         maxHealth: p.maxHealth,
