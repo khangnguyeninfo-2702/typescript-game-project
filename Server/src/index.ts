@@ -18,6 +18,7 @@ interface Player {
     id: string;
     name: string;
     radius: number;
+    tankType: TankType;
     x: number;
     y: number;
     vx: number;
@@ -63,6 +64,12 @@ let bullets: Bullet[] = [];
 let shapes: Shape[] = [];
 let bulletIdCounter = 0;
 let shapeIdCounter = 0;
+const TANK_TYPES = {
+    basic: { damageMult: 1,    barrels: [{ angle: 0, offset: 0 }] },
+    twin:  { damageMult: 0.65, barrels: [{ angle: 0, offset: 0.45 }, { angle: 0, offset: -0.45 }] },
+    flank: { damageMult: 0.75, barrels: [{ angle: 0, offset: 0 }, { angle: Math.PI, offset: 0 }] },
+};
+type TankType = keyof typeof TANK_TYPES;
 
 function getRadius(level: number) {
     return BASE_RADIUS + Math.min(level - 1, 30) * 0.6;
@@ -111,6 +118,7 @@ function respawnPlayer(player: Player) {
     
     player.maxHealth = 100 + (player.stats.maxHealth * 20);
     player.health = player.maxHealth;
+    player.tankType = 'basic';
 }
 
 console.log(`🎮 Game WebSocket server running on ws://localhost:${PORT}`);
@@ -126,6 +134,7 @@ wss.on('connection', (ws) => {
         y: -1000,
         vx: 0,
         vy: 0,
+        tankType: 'basic',
         angle: 0,
         score: 0,
         level: 1,
@@ -174,23 +183,31 @@ wss.on('connection', (ws) => {
             else if (data.type === 'SHOOT' && player.x > 0) {
                 const baseBulletSpeed = 10;
                 const bulletSpeed = baseBulletSpeed + (player.stats.bulletSpeed * 0.8);
-                const bulletDamage = 10 + (player.stats.bulletDamage * 5);
+                const type = TANK_TYPES[player.tankType];
+                const bulletDamage = (10 + (player.stats.bulletDamage * 5)) * type.damageMult;
                 const mass = getMass(player.radius);
                 const barrelTip = player.radius * 1.5 + 5;
-                bullets.push({
-                    id: `b_${bulletIdCounter++}`,
-                    playerId: id,
-                    x: player.x + Math.cos(player.angle) * barrelTip,
-                    y: player.y + Math.sin(player.angle) * barrelTip,
-                    vx: Math.cos(player.angle) * bulletSpeed,
-                    vy: Math.sin(player.angle) * bulletSpeed,
-                    life: 60,
-                    radius: 8,
-                    damage: bulletDamage
-                });
                 const recoilForce = (2.5 + (player.stats.reload * 0.2)) / mass;
-                player.vx -= Math.cos(player.angle) * recoilForce;
-                player.vy -= Math.sin(player.angle) * recoilForce;
+
+                for (const barrel of type.barrels) {
+                    const dir = player.angle + barrel.angle;
+                    const side = barrel.offset * player.radius;
+
+                    bullets.push({
+                        id: `b_${bulletIdCounter++}`,
+                        playerId: id,
+                        x: player.x + Math.cos(dir) * barrelTip - Math.sin(dir) * side,
+                        y: player.y + Math.sin(dir) * barrelTip + Math.cos(dir) * side,
+                        vx: Math.cos(dir) * bulletSpeed,
+                        vy: Math.sin(dir) * bulletSpeed,
+                        life: 60,
+                        radius: 8,
+                        damage: bulletDamage
+                    });
+
+                    player.vx -= Math.cos(dir) * recoilForce;
+                    player.vy -= Math.sin(dir) * recoilForce;
+                }
             }
             else if (data.type === 'UPGRADE_STAT') {
                 const statName = data.stat as keyof PlayerStats;
@@ -201,6 +218,12 @@ wss.on('connection', (ws) => {
                         player.maxHealth = 100 + (player.stats.maxHealth * 20);
                         player.health = player.maxHealth;
                     }
+                }
+            }
+            else if (data.type === 'CHOOSE_CLASS') {
+                const choice = data.tankType;
+                if (player.level >= 5 && player.tankType === 'basic' && (choice === 'twin' || choice === 'flank')) {
+                    player.tankType = choice;
                 }
             }
         } catch (err) {
@@ -358,6 +381,7 @@ setInterval(() => {
         name: p.name,
         x: p.x,
         y: p.y,
+        tankType: p.tankType,
         angle: p.angle,
         score: p.score,
         level: p.level,

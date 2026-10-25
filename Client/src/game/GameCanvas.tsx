@@ -14,6 +14,7 @@ interface Player {
     name: string;
     x: number;
     y: number;
+    tankType: string;
     radius: number;
     angle: number;
     score: number;
@@ -42,6 +43,20 @@ interface Shape {
 
 const MAP_SIZE = 3000;
 const DEBUG_SKIP_MENU = false;
+const TANK_BARRELS: Record<string, { angle: number; offset: number }[]> = {
+    basic: [{ angle: 0, offset: 0 }],
+    twin:  [{ angle: 0, offset: 0.45 }, { angle: 0, offset: -0.45 }],
+    flank: [{ angle: 0, offset: 0 }, { angle: Math.PI, offset: 0 }],
+};
+const classBtnStyle: React.CSSProperties = {
+    background: '#333',
+    color: '#fff',
+    border: '1px solid #666',
+    padding: '8px 16px',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    fontWeight: 'bold'
+};
 
 export const GameCanvas: React.FC = () => {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -262,8 +277,6 @@ export const GameCanvas: React.FC = () => {
                 const screenY = player.y - cameraY;
 
                 ctx.save();
-
-                // If it's our tank, apply the recoil offset backwards relative to the aim angle
                 if (isMe && recoilOffsetRef.current > 0) {
                     const kickX = -Math.cos(player.angle) * recoilOffsetRef.current;
                     const kickY = -Math.sin(player.angle) * recoilOffsetRef.current;
@@ -274,7 +287,14 @@ export const GameCanvas: React.FC = () => {
 
                 ctx.rotate(player.angle);
                 ctx.fillStyle = '#999999';
-                ctx.fillRect(0, -r * 0.4, r * 1.5, r * 0.8);   // barrel scales with size
+                const barrels = TANK_BARRELS[player.tankType] || TANK_BARRELS.basic;
+                const barrelW = player.tankType === 'twin' ? r * 0.5 : r * 0.8;
+                barrels.forEach((b) => {
+                    ctx.save();
+                    ctx.rotate(b.angle);
+                    ctx.fillRect(0, b.offset * r - barrelW / 2, r * 1.5, barrelW);
+                    ctx.restore();
+                });
                 ctx.beginPath();
                 ctx.arc(0, 0, r, 0, Math.PI * 2);               // body scales with size
                 ctx.fillStyle = isMe ? '#00b2e1' : '#f14e54';
@@ -383,6 +403,12 @@ export const GameCanvas: React.FC = () => {
         }
     };
 
+    const chooseClass = (tankType: string) => {
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify({ type: 'CHOOSE_CLASS', tankType }));
+        }
+    };
+
     return (
         <div style={{ position: 'relative', width: '100vw', height: '100vh', overflow: 'hidden' }}>
             <canvas ref={canvasRef} style={{ display: 'block', width: '100%', height: '100%', background: '#212121' }} />
@@ -473,7 +499,30 @@ export const GameCanvas: React.FC = () => {
                     background: 'rgba(20, 20, 20, 0.6)'
                 }}
             />
-
+            {/* Class Selection (level 5+) */}
+            {!inMenu && myPlayer && myPlayer.level >= 5 && myPlayer.tankType === 'basic' && (
+                <div style={{
+                    position: 'absolute',
+                    top: '20px',
+                    left: '50%',
+                    transform: 'translateX(-50%)',
+                    background: 'rgba(0, 0, 0, 0.7)',
+                    padding: '12px 16px',
+                    borderRadius: '8px',
+                    border: '2px solid #444',
+                    color: '#fff',
+                    fontFamily: 'Arial, sans-serif',
+                    textAlign: 'center'
+                }}>
+                    <div style={{ marginBottom: '8px', fontWeight: 'bold', color: '#ffcc00' }}>
+                        Choose your class
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                        <button onClick={() => chooseClass('twin')} style={classBtnStyle}>Twin</button>
+                        <button onClick={() => chooseClass('flank')} style={classBtnStyle}>Flank</button>
+                    </div>
+                </div>
+            )}
             {/* Upgrade Menu */}
             {!inMenu && myPlayer && myPlayer.skillPoints > 0 && (
                 <div style={{
