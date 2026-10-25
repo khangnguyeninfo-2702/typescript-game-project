@@ -40,7 +40,7 @@ interface Shape {
 }
 
 const MAP_SIZE = 3000;
-const DEBUG_SKIP_MENU = true;
+const DEBUG_SKIP_MENU = false; // Set to true to bypass menu for testing
 
 export const GameCanvas: React.FC = () => {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -58,6 +58,7 @@ export const GameCanvas: React.FC = () => {
     const [nameInput, setNameInput] = useState<string>('TestTank');
     const pendingNameRef = useRef<string | null>(DEBUG_SKIP_MENU ? 'TestTank' : null);
 
+    // Single unified WebSocket connection setup
     useEffect(() => {
         const canvas = canvasRef.current;
         const minimapCanvas = minimapRef.current;
@@ -69,16 +70,18 @@ export const GameCanvas: React.FC = () => {
 
         let animationFrameId: number;
 
+        console.log('[CLIENT] Initializing WebSocket connection to ws://localhost:8080...');
         const ws = new WebSocket('ws://localhost:8080');
         wsRef.current = ws;
 
         ws.onopen = () => {
-            console.log('Connected to server');
-            if (DEBUG_SKIP_MENU) {
-                ws.send(JSON.stringify({ type: 'JOIN_GAME', name: 'TestTank' }));
-            } else if (pendingNameRef.current) {
+            console.log('[CLIENT] WebSocket connected successfully!');
+            if (pendingNameRef.current) {
+                console.log('[CLIENT] Sending queued join request for:', pendingNameRef.current);
                 ws.send(JSON.stringify({ type: 'JOIN_GAME', name: pendingNameRef.current }));
                 pendingNameRef.current = null;
+            } else if (DEBUG_SKIP_MENU) {
+                ws.send(JSON.stringify({ type: 'JOIN_GAME', name: 'TestTank' }));
             }
         };
 
@@ -87,6 +90,7 @@ export const GameCanvas: React.FC = () => {
                 const data = JSON.parse(event.data);
                 if (data.type === 'INIT') {
                     myIdRef.current = data.id;
+                    console.log('[CLIENT] Received INIT ID:', data.id);
                 } 
                 else if (data.type === 'STATE_UPDATE') {
                     playersRef.current.clear();
@@ -107,6 +111,14 @@ export const GameCanvas: React.FC = () => {
             } catch (err) {
                 console.error('Failed to parse message', err);
             }
+        };
+
+        ws.onerror = (err) => {
+            console.error('[CLIENT] WebSocket error:', err);
+        };
+
+        ws.onclose = () => {
+            console.log('[CLIENT] WebSocket closed.');
         };
 
         const handleKeyDown = (e: KeyboardEvent) => {
@@ -326,18 +338,19 @@ export const GameCanvas: React.FC = () => {
             window.removeEventListener('mousedown', handleMouseDown);
             window.removeEventListener('resize', handleResize);
             cancelAnimationFrame(animationFrameId);
-            if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
-                ws.close();
-            }
+            ws.close();
         };
     }, []);
 
     const joinGame = (e: React.FormEvent) => {
         e.preventDefault();
         setInMenu(false);
-        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-            wsRef.current.send(JSON.stringify({ type: 'JOIN_GAME', name: nameInput }));
+
+        const ws = wsRef.current;
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'JOIN_GAME', name: nameInput }));
         } else {
+            // Still connecting: your existing ws.onopen sends this once connected
             pendingNameRef.current = nameInput;
         }
     };
@@ -424,21 +437,20 @@ export const GameCanvas: React.FC = () => {
             )}
 
             {/* Minimap */}
-            {!inMenu && (
-                <canvas 
-                    ref={minimapRef} 
-                    width={150} 
-                    height={150} 
-                    style={{
-                        position: 'absolute',
-                        bottom: '20px',
-                        right: '20px',
-                        borderRadius: '6px',
-                        border: '2px solid #444',
-                        background: 'rgba(20, 20, 20, 0.6)'
-                    }} 
-                />
-            )}
+            <canvas
+                ref={minimapRef}
+                width={150}
+                height={150}
+                style={{
+                    display: inMenu ? 'none' : 'block',
+                    position: 'absolute',
+                    bottom: '20px',
+                    right: '20px',
+                    borderRadius: '6px',
+                    border: '2px solid #444',
+                    background: 'rgba(20, 20, 20, 0.6)'
+                }}
+            />
 
             {/* Upgrade Menu */}
             {!inMenu && myPlayer && myPlayer.skillPoints > 0 && (

@@ -138,6 +138,8 @@ wss.on('connection', (ws) => {
                 player.y = Math.floor(Math.random() * 1000) + 1000;
                 player.maxHealth = 100 + (player.stats.maxHealth * 20);
                 player.health = player.maxHealth;
+                
+                console.log(`[SERVER] Player joined! ID: ${id}, Name: ${player.name}, Spawned at: (${player.x}, ${player.y})`); // <-- ADD THIS
             }
             else if (data.type === 'INPUT' && player.x > 0) {
                 const baseSpeed = 4;
