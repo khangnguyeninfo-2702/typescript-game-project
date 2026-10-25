@@ -17,8 +17,11 @@ interface PlayerStats {
 interface Player {
     id: string;
     name: string;
+    radius: number;
     x: number;
     y: number;
+    vx: number;
+    vy: number;
     angle: number;
     score: number;
     level: number;
@@ -55,10 +58,19 @@ interface Shape {
 }
 
 const players = new Map<string, Player>();
+const BASE_RADIUS = 20;
 let bullets: Bullet[] = [];
 let shapes: Shape[] = [];
 let bulletIdCounter = 0;
 let shapeIdCounter = 0;
+
+function getRadius(level: number) {
+    return BASE_RADIUS + Math.min(level - 1, 30) * 0.6;
+}
+
+function getMass(radius: number) {
+    return (radius / BASE_RADIUS) ** 2;
+}
 
 function spawnShapes() {
     while (shapes.length < 35) {
@@ -89,15 +101,14 @@ function spawnShapes() {
 spawnShapes();
 
 function respawnPlayer(player: Player) {
-    // Diep.io penalty: lose score/levels upon death
-    player.score = Math.max(0, Math.floor(player.score * 0.75));
+    player.score = Math.max(0, Math.floor(player.score * 0.50));
     player.level = Math.max(1, Math.floor(player.score / 100) + 1);
     
-    // Set coordinates to negative so the client knows you are dead and opens the menu
     player.x = -1000;
     player.y = -1000;
+    player.vx = 0;
+    player.vy = 0;
     
-    // Reset health for when you click Play again
     player.maxHealth = 100 + (player.stats.maxHealth * 20);
     player.health = player.maxHealth;
 }
@@ -110,8 +121,11 @@ wss.on('connection', (ws) => {
     const newPlayer: Player = {
         id,
         name: 'Unnamed',
-        x: -1000, // off-screen until joined
+        radius: BASE_RADIUS,
+        x: -1000,
         y: -1000,
+        vx: 0,
+        vy: 0,
         angle: 0,
         score: 0,
         level: 1,
@@ -136,20 +150,26 @@ wss.on('connection', (ws) => {
                 player.name = data.name || 'Tanker';
                 player.x = Math.floor(Math.random() * 1000) + 1000;
                 player.y = Math.floor(Math.random() * 1000) + 1000;
+                player.vx = 0;
+                player.vy = 0;
                 player.maxHealth = 100 + (player.stats.maxHealth * 20);
                 player.health = player.maxHealth;
                 
                 console.log(`[SERVER] Player joined! ID: ${id}, Name: ${player.name}, Spawned at: (${player.x}, ${player.y})`); // <-- ADD THIS
             }
             else if (data.type === 'INPUT' && player.x > 0) {
-                const baseSpeed = 4;
-                const speed = baseSpeed + (player.stats.movementSpeed * 0.4);
-                if (data.keys.w) player.y = Math.max(0, player.y - speed);
-                if (data.keys.s) player.y = Math.min(MAP_SIZE, player.y + speed);
-                if (data.keys.a) player.x = Math.max(0, player.x - speed);
-                if (data.keys.d) player.x = Math.min(MAP_SIZE, player.x + speed);
                 player.angle = data.angle || 0;
-            } 
+                const baseSpeed = 0.6;
+                const acceleration = baseSpeed + (player.stats.movementSpeed * 0.1);
+                let ax = 0;
+                let ay = 0;
+                if (data.keys.w) ay -= acceleration;
+                if (data.keys.s) ay += acceleration;
+                if (data.keys.a) ax -= acceleration;
+                if (data.keys.d) ax += acceleration;
+                player.vx += ax;
+                player.vy += ay;
+            }
             else if (data.type === 'SHOOT' && player.x > 0) {
                 const baseBulletSpeed = 10;
                 const bulletSpeed = baseBulletSpeed + (player.stats.bulletSpeed * 0.8);
@@ -166,6 +186,9 @@ wss.on('connection', (ws) => {
                     radius: 8,
                     damage: bulletDamage
                 });
+                const recoilForce = 2.5 + (player.stats.reload * 0.2); // Stronger reload/recoil scaling
+                player.vx -= Math.cos(player.angle) * recoilForce;
+                player.vy -= Math.sin(player.angle) * recoilForce;
             }
             else if (data.type === 'UPGRADE_STAT') {
                 const statName = data.stat as keyof PlayerStats;
@@ -226,12 +249,9 @@ setInterval(() => {
             }
         }
 
-        // Check collision with other players
         if (!bulletRemoved) {
             for (const targetPlayer of players.values()) {
-                // Don't hit yourself, and ignore unspawned players
                 if (targetPlayer.id === b.playerId || targetPlayer.x < 0) continue;
-
                 const dx = b.x - targetPlayer.x;
                 const dy = b.y - targetPlayer.y;
                 const dist = Math.sqrt(dx * dx + dy * dy);
@@ -241,11 +261,9 @@ setInterval(() => {
                     targetPlayer.health -= b.damage;
                     bulletRemoved = true;
 
-                    // Check if target player died from the bullet
                     if (targetPlayer.health <= 0) {
                         const killer = players.get(b.playerId);
                         if (killer) {
-                            // Reward killer with score based on victim's level
                             const bounty = targetPlayer.level * 50;
                             killer.score += bounty;
                             const newLevel = Math.floor(killer.score / 100) + 1;
@@ -266,7 +284,6 @@ setInterval(() => {
         }
     }
 
-    // 2. Shapes drift physics
     for (const shape of shapes) {
         shape.x += shape.vx;
         shape.y += shape.vy;
@@ -275,8 +292,19 @@ setInterval(() => {
         shape.x = Math.max(shape.radius, Math.min(MAP_SIZE - shape.radius, shape.x));
         shape.y = Math.max(shape.radius, Math.min(MAP_SIZE - shape.radius, shape.y));
     }
+    for (const player of players.values()) {
+        if (player.x < 0) continue;
 
-    // 3. Player-to-Shape collision resistance
+        player.x += player.vx;
+        player.y += player.vy;
+
+        player.vx *= 0.85;
+        player.vy *= 0.85;
+
+        player.x = Math.max(20, Math.min(MAP_SIZE - 20, player.x));
+        player.y = Math.max(20, Math.min(MAP_SIZE - 20, player.y));
+    }
+
     for (const player of players.values()) {
         if (player.x < 0) continue;
 
@@ -319,7 +347,6 @@ setInterval(() => {
 
     spawnShapes();
 
-    // 4. Broadcast state
     const playerStates = Array.from(players.values()).map(p => ({
         id: p.id,
         name: p.name,

@@ -13,11 +13,20 @@ export class GameServer {
     }
 
     private update() {
-        // Move players based on velocity/inputs
-        // Move bullets, check collisions (bullets hitting shapes/players)
+        for (const player of players.values()) {
+            if (player.x < 0) continue;
+
+            player.x += player.vx;
+            player.y += player.vy;
+
+            player.vx *= 0.85;
+            player.vy *= 0.85;
+
+            player.x = Math.max(20, Math.min(MAP_SIZE - 20, player.x));
+            player.y = Math.max(20, Math.min(MAP_SIZE - 20, player.y));
+        }
     }
 
     private broadcastState() {
-        // Serialize game state and send to all connected clients
     }
 }

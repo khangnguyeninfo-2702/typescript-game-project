@@ -53,6 +53,10 @@ export const GameCanvas: React.FC = () => {
     const mouseRef = useRef({ x: 0, y: 0 });
     const wsRef = useRef<WebSocket | null>(null);
 
+    // Combat timing & recoil refs
+    const lastShootTimeRef = useRef<number>(0);
+    const recoilOffsetRef = useRef<number>(0);
+
     const [myPlayer, setMyPlayer] = useState<Player | null>(null);
     const [inMenu, setInMenu] = useState<boolean>(!DEBUG_SKIP_MENU);
     const [nameInput, setNameInput] = useState<string>('TestTank');
@@ -138,7 +142,17 @@ export const GameCanvas: React.FC = () => {
 
         const handleMouseDown = (e: MouseEvent) => {
             if (e.button === 0 && wsRef.current?.readyState === WebSocket.OPEN) {
-                wsRef.current.send(JSON.stringify({ type: 'SHOOT' }));
+                const now = performance.now();
+                const me = myIdRef.current ? playersRef.current.get(myIdRef.current) : null;
+                
+                const reloadBonus = me ? me.stats.reload * 30 : 0; 
+                const fireCooldown = Math.max(80, 300 - reloadBonus);
+
+                if (now - lastShootTimeRef.current >= fireCooldown) {
+                    wsRef.current.send(JSON.stringify({ type: 'SHOOT' }));
+                    lastShootTimeRef.current = now;
+                    recoilOffsetRef.current = 12;
+                }
             }
         };
 
@@ -185,17 +199,21 @@ export const GameCanvas: React.FC = () => {
                 lastSendTime = time;
             }
 
+            if (recoilOffsetRef.current > 0.1) {
+                recoilOffsetRef.current *= 0.82;
+            } else {
+                recoilOffsetRef.current = 0;
+            }
+
             const myId = myIdRef.current;
             const me = myId ? playersRef.current.get(myId) : null;
             
             const cameraX = me && me.x > 0 ? me.x - canvas.width / 2 : 1500 - canvas.width / 2;
             const cameraY = me && me.y > 0 ? me.y - canvas.height / 2 : 1500 - canvas.height / 2;
 
-            // --- 1. RENDER MAIN GAME CANVAS ---
             ctx.fillStyle = '#212121';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-            // Grid Lines
             ctx.strokeStyle = '#2b2b2b';
             ctx.lineWidth = 1;
             const gridSize = 40;
@@ -210,7 +228,6 @@ export const GameCanvas: React.FC = () => {
                 ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
             }
 
-            // Render Shapes
             shapesRef.current.forEach((shape) => {
                 const screenX = shape.x - cameraX;
                 const screenY = shape.y - cameraY;
@@ -221,7 +238,6 @@ export const GameCanvas: React.FC = () => {
                 }
             });
 
-            // Render Bullets
             ctx.fillStyle = '#f14e54';
             bulletsRef.current.forEach((bullet) => {
                 const screenX = bullet.x - cameraX;
@@ -244,12 +260,19 @@ export const GameCanvas: React.FC = () => {
                 const screenY = player.y - cameraY;
 
                 ctx.save();
-                ctx.translate(screenX, screenY);
-                ctx.rotate(player.angle);
+                
+                // If it's our tank, apply the recoil offset backwards relative to the aim angle
+                if (isMe && recoilOffsetRef.current > 0) {
+                    const kickX = -Math.cos(player.angle) * recoilOffsetRef.current;
+                    const kickY = -Math.sin(player.angle) * recoilOffsetRef.current;
+                    ctx.translate(screenX + kickX, screenY + kickY);
+                } else {
+                    ctx.translate(screenX, screenY);
+                }
 
+                ctx.rotate(player.angle);
                 ctx.fillStyle = '#999999';
                 ctx.fillRect(0, -8, 30, 16);
-
                 ctx.beginPath();
                 ctx.arc(0, 0, 20, 0, Math.PI * 2);
                 ctx.fillStyle = isMe ? '#00b2e1' : '#f14e54';
@@ -260,7 +283,6 @@ export const GameCanvas: React.FC = () => {
                 ctx.closePath();
                 ctx.restore();
 
-                // Health Bar
                 const barWidth = 40;
                 const barHeight = 6;
                 const maxH = player.maxHealth || 100;
@@ -276,14 +298,12 @@ export const GameCanvas: React.FC = () => {
                 ctx.lineWidth = 1;
                 ctx.strokeRect(screenX - barWidth / 2, screenY + 28, barWidth, barHeight);
 
-                // Name & Level label
                 ctx.fillStyle = '#ffffff';
                 ctx.font = '12px Arial';
                 ctx.textAlign = 'center';
                 ctx.fillText(`${player.name || 'Tanker'} (Lvl ${player.level || 1})`, screenX, screenY - 30);
             });
 
-            // --- 2. RENDER MINIMAP ---
             const miniWidth = minimapCanvas.width;
             const miniHeight = minimapCanvas.height;
             const scaleX = miniWidth / MAP_SIZE;
@@ -350,7 +370,6 @@ export const GameCanvas: React.FC = () => {
         if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: 'JOIN_GAME', name: nameInput }));
         } else {
-            // Still connecting: your existing ws.onopen sends this once connected
             pendingNameRef.current = nameInput;
         }
     };
@@ -474,6 +493,7 @@ export const GameCanvas: React.FC = () => {
                             { key: 'maxHealth', label: 'Max Health', val: myPlayer.stats.maxHealth },
                             { key: 'bulletDamage', label: 'Bullet Damage', val: myPlayer.stats.bulletDamage },
                             { key: 'bulletSpeed', label: 'Bullet Speed', val: myPlayer.stats.bulletSpeed },
+                            { key: 'reload', label: 'Attack Speed (Reload)', val: myPlayer.stats.reload },
                             { key: 'movementSpeed', label: 'Movement Speed', val: myPlayer.stats.movementSpeed },
                         ].map((stat) => (
                             <button
