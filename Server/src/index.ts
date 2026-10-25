@@ -111,6 +111,10 @@ function respawnPlayer(player: Player) {
     player.score = Math.max(0, Math.floor(player.score * 0.50));
     player.level = Math.max(1, Math.floor(player.score / 100) + 1);
     
+    player.stats = { healthRegen: 0, maxHealth: 0, bulletDamage: 0, bulletSpeed: 0, reload: 0, movementSpeed: 0 };
+    player.skillPoints = player.level - 1;
+    player.radius = getRadius(player.level);
+    
     player.x = -1000;
     player.y = -1000;
     player.vx = 0;
